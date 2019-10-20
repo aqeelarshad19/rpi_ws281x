@@ -50,13 +50,13 @@ class _LED_Data(object):
 
 
 class Adafruit_NeoPixel(object):
-	def __init__(self, num, pin, freq_hz=800000, dma=5, invert=False,
+	def __init__(self, num, pin, freq_hz=800000, dma=10, invert=False,
 			brightness=255, channel=0, strip_type=ws.WS2811_STRIP_RGB):
 		"""Class to represent a NeoPixel/WS281x LED display.  Num should be the
 		number of pixels in the display, and pin should be the GPIO pin connected
 		to the display signal line (must be a PWM pin like 18!).  Optional
 		parameters are freq, the frequency of the display signal in hertz (default
-		800khz), dma, the DMA channel to use (default 5), invert, a boolean
+		800khz), dma, the DMA channel to use (default 10), invert, a boolean
 		specifying if the signal line should be inverted (default False), and
 		channel, the PWM channel to use (defaults to 0).
 		"""
@@ -129,6 +129,12 @@ class Adafruit_NeoPixel(object):
 		of 0 is the darkest and 255 is the brightest.
 		"""
 		ws.ws2811_channel_t_brightness_set(self._channel, brightness)
+
+	def getBrightness(self):
+		"""Get the brightness value for each LED in the buffer. A brightness
+		of 0 is the darkest and 255 is the brightest.
+		"""
+		return ws.ws2811_channel_t_brightness_get(self._channel)
 
 	def getPixels(self):
 		"""Return an object which allows access to the LED display data as if

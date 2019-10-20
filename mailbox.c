@@ -43,13 +43,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "mailbox.h"
 
 
-void *mapmem(uint32_t base, uint32_t size) {
+void *mapmem(uint32_t base, uint32_t size, const char *mem_dev) {
     uint32_t pagemask = ~0UL ^ (getpagesize() - 1);
     uint32_t offsetmask = getpagesize() - 1;
     int mem_fd;
     void *mem;
 
-    mem_fd = open("/dev/mem", O_RDWR | O_SYNC);
+    mem_fd = open(mem_dev, O_RDWR | O_SYNC);
     if (mem_fd < 0) {
        perror("Can't open /dev/mem");
        return NULL;
@@ -68,7 +68,7 @@ void *mapmem(uint32_t base, uint32_t size) {
 
 void *unmapmem(void *addr, uint32_t size) {
     uint32_t pagemask = ~0UL ^ (getpagesize() - 1);
-    uint32_t baseaddr = (uint32_t)addr & pagemask;
+    uintptr_t baseaddr = (uintptr_t)addr & pagemask;
     int s;
     
     s = munmap((void *)baseaddr, size);

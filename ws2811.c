@@ -56,6 +56,7 @@
 #define BUS_TO_PHYS(x)                           ((x)&~0xC0000000)
 
 #define OSC_FREQ                                 19200000   // crystal frequency
+#define OSC_FREQ_PI4                             54000000   // Pi 4 crystal frequency
 
 /* 4 colors (R, G, B + W), 8 bits per byte, 3 symbols per bit + 55uS low for reset signal */
 #define LED_COLOURS                              4
@@ -175,7 +176,7 @@ static int map_registers(ws2811_t *ws2811)
     }
     dma_addr += rpi_hw->periph_base;
 
-    device->dma = mapmem(dma_addr, sizeof(dma_t));
+    device->dma = mapmem(dma_addr, sizeof(dma_t), DEV_MEM);
     if (!device->dma)
     {
         return -1;
@@ -183,7 +184,7 @@ static int map_registers(ws2811_t *ws2811)
 
     switch (device->driver_mode) {
     case PWM:
-        device->pwm = mapmem(PWM_OFFSET + base, sizeof(pwm_t));
+        device->pwm = mapmem(PWM_OFFSET + base, sizeof(pwm_t), DEV_MEM);
         if (!device->pwm)
         {
             return -1;
@@ -191,7 +192,7 @@ static int map_registers(ws2811_t *ws2811)
         break;
 
     case PCM:
-        device->pcm = mapmem(PCM_OFFSET + base, sizeof(pcm_t));
+        device->pcm = mapmem(PCM_OFFSET + base, sizeof(pcm_t), DEV_MEM);
         if (!device->pcm)
         {
             return -1;
@@ -199,7 +200,12 @@ static int map_registers(ws2811_t *ws2811)
         break;
     }
 
-    device->gpio = mapmem(GPIO_OFFSET + base, sizeof(gpio_t));
+    /*
+     * The below call can potentially work with /dev/gpiomem instead.
+     * However, it used /dev/mem before, so I'm leaving it as such.
+     */
+
+    device->gpio = mapmem(GPIO_OFFSET + base, sizeof(gpio_t), DEV_MEM);
     if (!device->gpio)
     {
         return -1;
@@ -213,7 +219,7 @@ static int map_registers(ws2811_t *ws2811)
         offset = CM_PCM_OFFSET;
         break;
     }
-    device->cm_clk = mapmem(offset + base, sizeof(cm_clk_t));
+    device->cm_clk = mapmem(offset + base, sizeof(cm_clk_t), DEV_MEM);
     if (!device->cm_clk)
     {
         return -1;
@@ -342,10 +348,18 @@ static int setup_pwm(ws2811_t *ws2811)
     uint32_t freq = ws2811->freq;
     int32_t byte_count;
 
+    const rpi_hw_t *rpi_hw = ws2811->rpi_hw;
+    const uint32_t rpi_type = rpi_hw->type;
+    uint32_t osc_freq = OSC_FREQ;
+
+    if(rpi_type == RPI_HWVER_TYPE_PI4){
+        osc_freq = OSC_FREQ_PI4;
+    }
+
     stop_pwm(ws2811);
 
     // Setup the Clock - Use OSC @ 19.2Mhz w/ 3 clocks/tick
-    cm_clk->div = CM_CLK_DIV_PASSWD | CM_CLK_DIV_DIVI(OSC_FREQ / (3 * freq));
+    cm_clk->div = CM_CLK_DIV_PASSWD | CM_CLK_DIV_DIVI(osc_freq / (3 * freq));
     cm_clk->ctl = CM_CLK_CTL_PASSWD | CM_CLK_CTL_SRC_OSC;
     cm_clk->ctl = CM_CLK_CTL_PASSWD | CM_CLK_CTL_SRC_OSC | CM_CLK_CTL_ENAB;
     usleep(10);
@@ -387,7 +401,7 @@ static int setup_pwm(ws2811_t *ws2811)
 
     dma_cb->source_ad = addr_to_bus(device, device->pxl_raw);
 
-    dma_cb->dest_ad = (uint32_t)&((pwm_t *)PWM_PERIPH_PHYS)->fif1;
+    dma_cb->dest_ad = (uintptr_t)&((pwm_t *)PWM_PERIPH_PHYS)->fif1;
     dma_cb->txfr_len = byte_count;
     dma_cb->stride = 0;
     dma_cb->nextconbk = 0;
@@ -417,10 +431,18 @@ static int setup_pcm(ws2811_t *ws2811)
     uint32_t freq = ws2811->freq;
     int32_t byte_count;
 
+    const rpi_hw_t *rpi_hw = ws2811->rpi_hw;
+    const uint32_t rpi_type = rpi_hw->type;
+    uint32_t osc_freq = OSC_FREQ;
+
+    if(rpi_type == RPI_HWVER_TYPE_PI4){
+        osc_freq = OSC_FREQ_PI4;
+    }
+
     stop_pcm(ws2811);
 
     // Setup the PCM Clock - Use OSC @ 19.2Mhz w/ 3 clocks/tick
-    cm_clk->div = CM_CLK_DIV_PASSWD | CM_CLK_DIV_DIVI(OSC_FREQ / (3 * freq));
+    cm_clk->div = CM_CLK_DIV_PASSWD | CM_CLK_DIV_DIVI(osc_freq / (3 * freq));
     cm_clk->ctl = CM_CLK_CTL_PASSWD | CM_CLK_CTL_SRC_OSC;
     cm_clk->ctl = CM_CLK_CTL_PASSWD | CM_CLK_CTL_SRC_OSC | CM_CLK_CTL_ENAB;
     usleep(10);
@@ -452,7 +474,7 @@ static int setup_pcm(ws2811_t *ws2811)
                  RPI_DMA_TI_SRC_INC;          // Increment src addr
 
     dma_cb->source_ad = addr_to_bus(device, device->pxl_raw);
-    dma_cb->dest_ad = (uint32_t)&((pcm_t *)PCM_PERIPH_PHYS)->fifo;
+    dma_cb->dest_ad = (uintptr_t)&((pcm_t *)PCM_PERIPH_PHYS)->fifo;
     dma_cb->txfr_len = byte_count;
     dma_cb->stride = 0;
     dma_cb->nextconbk = 0;
@@ -786,7 +808,7 @@ static ws2811_return_t spi_init(ws2811_t *ws2811)
     device->mbox.handle = -1;
 
     // Set SPI-MOSI pin
-    device->gpio = mapmem(GPIO_OFFSET + base, sizeof(gpio_t));
+    device->gpio = mapmem(GPIO_OFFSET + base, sizeof(gpio_t), DEV_GPIOMEM);
     if (!device->gpio)
     {
         return WS2811_ERROR_SPI_SETUP;
@@ -806,7 +828,7 @@ static ws2811_return_t spi_init(ws2811_t *ws2811)
     {
       channel->strip_type=WS2811_STRIP_RGB;
     }
-  
+
     // Set default uncorrected gamma table
     if (!channel->gamma)
     {
@@ -887,6 +909,7 @@ ws2811_return_t ws2811_init(ws2811_t *ws2811)
     {
         return WS2811_ERROR_OUT_OF_MEMORY;
     }
+    memset(ws2811->device, 0, sizeof(*ws2811->device));
     device = ws2811->device;
 
     if (check_hwver_and_gpionum(ws2811) < 0)
@@ -935,7 +958,7 @@ ws2811_return_t ws2811_init(ws2811_t *ws2811)
        return WS2811_ERROR_MEM_LOCK;
     }
 
-    device->mbox.virt_addr = mapmem(BUS_TO_PHYS(device->mbox.bus_addr), device->mbox.size);
+    device->mbox.virt_addr = mapmem(BUS_TO_PHYS(device->mbox.bus_addr), device->mbox.size, DEV_MEM);
     if (!device->mbox.virt_addr)
     {
         mem_unlock(device->mbox.handle, device->mbox.mem_ref);
